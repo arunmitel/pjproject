@@ -25,3 +25,8 @@
 #   define PJMEDIA_HAS_ILBC_CODEC    0
 #   define PJMEDIA_HAS_GSM_CODEC     0
 #   define PJMEDIA_HAS_L16_CODEC     0
+#   define PJMEDIA_HAS_OPENCORE_AMRNB_CODEC 0
+
+// Auth header
+#   define PJSIP_AUTH_HEADER_CACHING    1
+#   define PJSIP_AUTH_AUTO_SEND_NEXT    1
