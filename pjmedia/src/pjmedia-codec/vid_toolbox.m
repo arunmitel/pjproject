@@ -61,6 +61,8 @@
 /* Maximum duration from one key frame to the next (in seconds). */
 #define KEYFRAME_INTERVAL	5
 
+/* vidtoolbox H264 default PT */
+#define VT_H264_PT		PJMEDIA_RTP_PT_H264_RSV1
 /*
  * Factory operations.
  */
@@ -180,6 +182,7 @@ typedef struct vtool_codec_data
 /* Prototypes */
 static OSStatus create_decoder(struct vtool_codec_data *vtool_data);
 
+#if TARGET_OS_IPHONE
 static void dispatch_sync_on_main_queue(void (^block)(void))
 {
     if ([NSThread isMainThread]) {
@@ -188,6 +191,7 @@ static void dispatch_sync_on_main_queue(void (^block)(void))
         dispatch_sync(dispatch_get_main_queue(), block);
     }
 }
+#endif
 
 PJ_DEF(pj_status_t) pjmedia_codec_vid_toolbox_init(pjmedia_vid_codec_mgr *mgr,
                                                    pj_pool_factory *pf)
@@ -265,7 +269,7 @@ static pj_status_t vtool_test_alloc(pjmedia_vid_codec_factory *factory,
     PJ_ASSERT_RETURN(factory == &vtool_factory.base, PJ_EINVAL);
 
     if (info->fmt_id == PJMEDIA_FORMAT_H264 &&
-	info->pt != 0)
+	info->pt == VT_H264_PT)
     {
 	return PJ_SUCCESS;
     }
@@ -321,7 +325,7 @@ static pj_status_t vtool_enum_info(pjmedia_vid_codec_factory *factory,
 
     *count = 1;
     info->fmt_id = PJMEDIA_FORMAT_H264;
-    info->pt = PJMEDIA_RTP_PT_H264;
+    info->pt = VT_H264_PT;
     info->encoding_name = pj_str((char*)"H264");
     info->encoding_desc = pj_str((char*)"Video Toolbox codec");
     info->clock_rate = 90000;

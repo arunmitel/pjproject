@@ -395,6 +395,18 @@ typedef struct pj_stun_resolve_result pj_stun_resolve_result;
 
 
 /**
+ * Specify whether pjsua should disable automatically sending initial
+ * answer 100/Trying for incoming calls. If disabled, application can
+ * later send 100/Trying if it wishes using pjsua_call_answer().
+ *
+ * Default: 0 (automatic sending enabled)
+ */
+#ifndef PJSUA_DISABLE_AUTO_SEND_100
+#   define PJSUA_DISABLE_AUTO_SEND_100	0
+#endif
+
+
+/**
  * Default options that will be passed when creating ice transport.
  * See #pjmedia_transport_ice_options.
  */
@@ -2005,10 +2017,9 @@ typedef struct pjsua_config
 
     /** 
      * Maximum calls to support (default: 4). The value specified here
-     * must be smaller than the compile time maximum settings 
-     * PJSUA_MAX_CALLS, which by default is 32. To increase this 
-     * limit, the library must be recompiled with new PJSUA_MAX_CALLS
-     * value.
+     * must be smaller than or equal to the compile time maximum settings
+     * PJSUA_MAX_CALLS. To increase this limit, the library must be
+     * recompiled with new PJSUA_MAX_CALLS value.
      */
     unsigned	    max_calls;
 
@@ -3344,6 +3355,19 @@ PJ_DECL(pj_status_t) pjsua_transport_lis_start( pjsua_transport_id id,
 #   define PJSUA_REG_RETRY_INTERVAL	300
 #endif
 
+/**
+ * When the registration is successfull, the auto registration refresh will
+ * be sent before it expires. Setting this to 0 will disable it.
+ * This is useful for app that uses Push Notification and doesn't require auto
+ * registration refresh. App can periodically send refresh registration or
+ * send it before making a call.=
+ * See https://github.com/pjsip/pjproject/pull/2652 for more info.
+ *
+ * Default: 1 (enabled)
+ */
+#ifndef PJSUA_REG_AUTO_REG_REFRESH
+#   define PJSUA_REG_AUTO_REG_REFRESH     1
+#endif
 
 /**
  * This macro specifies the default value for \a contact_rewrite_method
@@ -4794,7 +4818,7 @@ PJ_DECL(pj_status_t) pjsua_acc_set_transport(pjsua_acc_id acc_id,
  * Maximum simultaneous calls.
  */
 #ifndef PJSUA_MAX_CALLS
-#   define PJSUA_MAX_CALLS	    32
+#   define PJSUA_MAX_CALLS	    4
 #endif
 
 /**

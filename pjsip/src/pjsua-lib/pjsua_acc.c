@@ -2337,6 +2337,8 @@ static void regc_cb(struct pjsip_regc_cbparam *param)
      * Print registration status.
      */
     if (param->status!=PJ_SUCCESS) {
+    	pj_status_t status;
+
 	pjsua_perror(THIS_FILE, "SIP registration error", 
 		     param->status);
 
@@ -2346,14 +2348,26 @@ static void regc_cb(struct pjsip_regc_cbparam *param)
 	    return;
 	}
 
-	pjsip_regc_destroy(acc->regc);
-	acc->regc = NULL;
-	acc->contact.slen = 0;
-	acc->reg_mapped_addr.slen = 0;
-	acc->rfc5626_status = OUTBOUND_UNKNOWN;
+	/* This callback is called without holding the registration's lock,
+	 * so there can be a race condition with another registration
+	 * process. Therefore, we must not forcefully try to destroy
+	 * the registration here.
+	 */
+	status = pjsip_regc_destroy2(acc->regc, PJ_FALSE);
+	if (status == PJ_SUCCESS) {
+	    acc->regc = NULL;
+	    acc->contact.slen = 0;
+	    acc->reg_mapped_addr.slen = 0;
+	    acc->rfc5626_status = OUTBOUND_UNKNOWN;
 	
-	/* Stop keep-alive timer if any. */
-	update_keep_alive(acc, PJ_FALSE, NULL);
+	    /* Stop keep-alive timer if any. */
+	    update_keep_alive(acc, PJ_FALSE, NULL);
+	} else {
+	    /* Another registration is in progress. */
+	    pj_assert(status == PJ_EBUSY);
+	    pjsua_perror(THIS_FILE, "Deleting registration failed", 
+		     	 status);	    
+	}
 
     } else if (param->code < 0 || param->code >= 300) {
 	PJ_LOG(2, (THIS_FILE, "SIP registration failed, status=%d (%.*s)", 
@@ -2412,14 +2426,26 @@ static void regc_cb(struct pjsip_regc_cbparam *param)
 	    /* Check and update Service-Route header */
 	    update_service_route(acc, param->rdata);
 
-	    PJ_LOG(3, (THIS_FILE, 
-		       "%s: registration success, status=%d (%.*s), "
-		       "will re-register in %d seconds", 
-		       pjsua_var.acc[acc->index].cfg.id.ptr,
-		       param->code,
-		       (int)param->reason.slen, param->reason.ptr,
-		       param->expiration));
+#if         PJSUA_REG_AUTO_REG_REFRESH
 
+            PJ_LOG(3, (THIS_FILE,
+                        "%s: registration success, status=%d (%.*s), "
+                        "will re-register in %d seconds",
+                        pjsua_var.acc[acc->index].cfg.id.ptr,
+                        param->code,
+                        (int)param->reason.slen, param->reason.ptr,
+                        param->expiration));
+
+#else
+
+            PJ_LOG(3, (THIS_FILE,
+                        "%s: registration success, status=%d (%.*s), "
+                        "auto re-register disabled",
+                        pjsua_var.acc[acc->index].cfg.id.ptr,
+                        param->code,
+                        (int)param->reason.slen, param->reason.ptr));
+
+#endif
 	    /* Start keep-alive timer if necessary. */
 	    update_keep_alive(acc, PJ_TRUE, param);
 
@@ -2780,7 +2806,8 @@ PJ_DEF(pj_status_t) pjsua_acc_set_registration( pjsua_acc_id acc_id,
 	    goto on_return;
 	}
 
-	status = pjsip_regc_register(pjsua_var.acc[acc_id].regc, 1, 
+	status = pjsip_regc_register(pjsua_var.acc[acc_id].regc,
+                                     PJSUA_REG_AUTO_REG_REFRESH,
 				     &tdata);
 
 	if (0 && status == PJ_SUCCESS && pjsua_var.acc[acc_id].cred_cnt) {

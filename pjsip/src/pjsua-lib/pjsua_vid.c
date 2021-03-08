@@ -85,6 +85,15 @@ pj_status_t pjsua_vid_subsys_init(void)
     }
 #endif
 
+#if PJMEDIA_HAS_VIDEO && PJMEDIA_HAS_ANDROID_MEDIACODEC
+    status = pjmedia_codec_and_media_vid_init(NULL, &pjsua_var.cp.factory);
+    if (status != PJ_SUCCESS) {
+	pjsua_perror(THIS_FILE, "Error initializing AMediaCodec library",
+		     status);
+	goto on_error;
+    }
+#endif
+
 #if PJMEDIA_HAS_VIDEO && PJMEDIA_HAS_OPENH264_CODEC
     status = pjmedia_codec_openh264_vid_init(NULL, &pjsua_var.cp.factory);
     if (status != PJ_SUCCESS) {
@@ -169,6 +178,11 @@ pj_status_t pjsua_vid_subsys_destroy(void)
 
 #if PJMEDIA_HAS_VIDEO && PJMEDIA_HAS_VID_TOOLBOX_CODEC
     pjmedia_codec_vid_toolbox_deinit();
+#endif
+
+#if defined(PJMEDIA_HAS_ANDROID_MEDIACODEC) && \
+    PJMEDIA_HAS_ANDROID_MEDIACODEC != 0
+    pjmedia_codec_and_media_vid_deinit();
 #endif
 
 #if defined(PJMEDIA_HAS_OPENH264_CODEC) && PJMEDIA_HAS_OPENH264_CODEC != 0
@@ -1220,25 +1234,25 @@ pj_status_t pjsua_vid_channel_update(pjsua_call_media *call_med,
 	    pj_log_pop_indent();
 	}
 
+        /* Retrieve stream encoding port */
+        status = pjmedia_vid_stream_get_port(call_med->strm.v.stream,
+                                             PJMEDIA_DIR_ENCODING,
+                                             &media_port);
+        if (status != PJ_SUCCESS)
+            goto on_error;
+
+        /* Register stream encoding to conf, using tmp_pool should be fine
+         * as bridge will create its own pool (using tmp_pool factory).
+         */
+        status = pjsua_vid_conf_add_port(tmp_pool, media_port, NULL,
+                                         &call_med->strm.v.strm_enc_slot);
+        if (status != PJ_SUCCESS)
+            goto on_error;
+
 	/* Setup encoding direction */
 	if (si->dir & PJMEDIA_DIR_ENCODING) {
 	    PJ_LOG(4,(THIS_FILE, "Setting up TX.."));
 	    pj_log_push_indent();
-
-	    /* Retrieve stream encoding port */
-	    status = pjmedia_vid_stream_get_port(call_med->strm.v.stream,
-						 PJMEDIA_DIR_ENCODING,
-						 &media_port);
-	    if (status != PJ_SUCCESS)
-		goto on_error;
-
-	    /* Register stream encoding to conf, using tmp_pool should be fine
-	     * as bridge will create its own pool (using tmp_pool factory).
-	     */
-	    status = pjsua_vid_conf_add_port(tmp_pool, media_port, NULL,
-					     &call_med->strm.v.strm_enc_slot);
-	    if (status != PJ_SUCCESS)
-		goto on_error;
 
 	    if (!call->local_hold && acc->cfg.vid_out_auto_transmit) {
 	    	status = setup_vid_capture(call_med);
@@ -1280,16 +1294,6 @@ void pjsua_vid_stop_stream(pjsua_call_media *call_med)
     PJ_LOG(4,(THIS_FILE, "Stopping video stream.."));
     pj_log_push_indent();
     
-    /* Unregister video stream ports (encode+decode) from conference */
-    if (call_med->strm.v.strm_enc_slot != PJSUA_INVALID_ID) {
-	pjsua_vid_conf_remove_port(call_med->strm.v.strm_enc_slot);
-	call_med->strm.v.strm_enc_slot = PJSUA_INVALID_ID;
-    }
-    if (call_med->strm.v.strm_dec_slot != PJSUA_INVALID_ID) {
-	pjsua_vid_conf_remove_port(call_med->strm.v.strm_dec_slot);
-	call_med->strm.v.strm_dec_slot = PJSUA_INVALID_ID;
-    }
-
     pjmedia_vid_stream_send_rtcp_bye(strm);
 
     PJSUA_LOCK();
@@ -1327,9 +1331,24 @@ void pjsua_vid_stop_stream(pjsua_call_media *call_med)
     }
     PJSUA_UNLOCK();
 
-    if ((call_med->dir & PJMEDIA_DIR_ENCODING) &&
-	(pjmedia_vid_stream_get_stat(strm, &stat) == PJ_SUCCESS) &&
-	stat.tx.pkt)
+    /* Unregister video stream ports (encode+decode) from conference */
+    if (call_med->strm.v.strm_enc_slot != PJSUA_INVALID_ID) {
+	pjsua_vid_conf_remove_port(call_med->strm.v.strm_enc_slot);
+	call_med->strm.v.strm_enc_slot = PJSUA_INVALID_ID;
+    }
+    if (call_med->strm.v.strm_dec_slot != PJSUA_INVALID_ID) {
+	pjsua_vid_conf_remove_port(call_med->strm.v.strm_dec_slot);
+	call_med->strm.v.strm_dec_slot = PJSUA_INVALID_ID;
+    }
+
+    /* Don't check for direction and transmitted packets count as we
+     * assume that RTP timestamp remains increasing when outgoing
+     * direction is disabled/paused.
+     */
+     //if ((call_med->dir & PJMEDIA_DIR_ENCODING) &&
+     //    (pjmedia_vid_stream_get_stat(strm, &stat) == PJ_SUCCESS) &&
+     //    stat.tx.pkt)
+    if (pjmedia_vid_stream_get_stat(strm, &stat) == PJ_SUCCESS)
     {
 	/* Save RTP timestamp & sequence, so when media session is
 	 * restarted, those values will be restored as the initial
@@ -1927,13 +1946,8 @@ static pj_status_t call_add_video(pjsua_call *call,
 
     sdp = pjmedia_sdp_session_clone(call->inv->pool_prov, current_sdp);
 
-    /* Clean up provisional media before using it */
-    pjsua_media_prov_clean_up(call->index);
-
-    /* Update provisional media from call media */
-    call->med_prov_cnt = call->med_cnt;
-    pj_memcpy(call->media_prov, call->media,
-	      sizeof(call->media[0]) * call->med_cnt);
+    /* Clean up & sync provisional media before using it */
+    pjsua_media_prov_revert(call->index);
 
     /* Initialize call media */
     call_med = &call->media_prov[call->med_prov_cnt++];
@@ -2039,13 +2053,8 @@ static pj_status_t call_modify_video(pjsua_call *call,
 	med_idx = first_active;
     }
 
-    /* Clean up provisional media before using it */
-    pjsua_media_prov_clean_up(call->index);
-
-    /* Update provisional media from call media */
-    call->med_prov_cnt = call->med_cnt;
-    pj_memcpy(call->media_prov, call->media,
-	      sizeof(call->media[0]) * call->med_cnt);
+    /* Clean up & sync provisional media before using it */
+    pjsua_media_prov_revert(call->index);
 
     call_med = &call->media_prov[med_idx];
 
@@ -2158,7 +2167,9 @@ static pj_status_t call_modify_video(pjsua_call *call,
 
 on_error:
 	if (status != PJ_SUCCESS) {
-	    pjsua_media_prov_clean_up(call->index);
+	    /* Revert back provisional media. */
+	    pjsua_media_prov_revert(call->index);
+
 	    return status;
 	}
     
