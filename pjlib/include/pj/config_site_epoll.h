@@ -26,3 +26,6 @@
 #   define PJMEDIA_HAS_GSM_CODEC     0
 #   define PJMEDIA_HAS_L16_CODEC     0
 #   define PJMEDIA_HAS_OPENCORE_AMRNB_CODEC 0
+
+// Registration Refresh
+#   define PJSIP_REGISTER_CLIENT_DELAY_BEFORE_REFRESH    2
