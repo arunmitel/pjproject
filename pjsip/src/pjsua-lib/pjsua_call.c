@@ -332,7 +332,7 @@ static pjsua_call_id alloc_call_id(void)
 	if (pjsua_var.calls[cid].inv == NULL &&
             pjsua_var.calls[cid].async_call.dlg == NULL)
         {
-	    ++pjsua_var.next_call_id;
+	    pjsua_var.next_call_id = cid + 1;
 	    return cid;
 	}
     }
@@ -341,7 +341,7 @@ static pjsua_call_id alloc_call_id(void)
 	if (pjsua_var.calls[cid].inv == NULL &&
             pjsua_var.calls[cid].async_call.dlg == NULL)
         {
-	    ++pjsua_var.next_call_id;
+	    pjsua_var.next_call_id = cid + 1;
 	    return cid;
 	}
     }
